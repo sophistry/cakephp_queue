@@ -22,17 +22,21 @@ class CronShell extends AppShell {
 	public $uses = array(
 		'Queue.CronTask'
 	);
-	/**
-	 * Codecomplete Hint
-	 *
-	 * @var QueuedTask
-	 */
-	public $QueuedTask;
 
-	protected $taskConf;
+	/**
+	 * @var CronTask
+	 */
+	public $CronTask;
+
+	/**
+	 * @var array
+	 */
+	protected $_taskConf;
 
 	/**
 	 * Overwrite shell initialize to dynamically load all Queue Related Tasks.
+	 *
+	 * @return void
 	 */
 	public function initialize() {
 		$this->_loadModels();
@@ -62,9 +66,9 @@ class CronShell extends AppShell {
 		//Config can be overwritten via local app config.
 		Configure::load('Queue.queue');
 
-		$conf = (array)Configure::read('queue');
+		$conf = (array)Configure::read('Queue');
 		//merge with default configuration vars.
-		Configure::write('queue', array_merge(array(
+		Configure::write('Queue', array_merge(array(
 			'maxruntime' => DAY,
 			'cleanuptimeout' => MONTH,
 		/*
@@ -80,6 +84,8 @@ class CronShell extends AppShell {
 
 	/**
 	 * Output some basic usage Info.
+	 *
+	 * @return void
 	 */
 	public function main() {
 		$this->out('CakePHP Cronjobs:');
@@ -107,6 +113,7 @@ class CronShell extends AppShell {
 	 * Look for a Queue Task of hte passed name and try to call add() on it.
 	 * A QueueTask may provide an add function to enable the user to create new jobs via commandline.
 	 *
+	 * @return void
 	 */
 	public function add() {
 		if (count($this->args) < 1) {
@@ -130,15 +137,12 @@ class CronShell extends AppShell {
 
 	/**
 	 * Select all active and due cronjobs and execute them
-	 * 2011-07-18 ms
 	 */
 	public function run() {
 		// Enable Garbage Collector (PHP >= 5.3)
 		if (function_exists('gc_enable')) {
 			gc_enable();
 		}
-
-
 	}
 
 	/**
@@ -159,26 +163,26 @@ class CronShell extends AppShell {
 		}
 		while (!$exit) {
 			$this->out('Looking for Job....');
-			$data = $this->QueuedTask->requestJob($this->_getTaskConf(), $group);
-			if ($this->QueuedTask->exit === true) {
+			$data = $this->CronTask->requestJob($this->_getTaskConf(), $group);
+			if ($this->CronTask->exit === true) {
 				$exit = true;
 			} else {
-				if ($data !== false) {
+				if ($data) {
 					$this->out('Running Job of type "' . $data['jobtype'] . '"');
 					$taskname = 'queue_' . strtolower($data['jobtype']);
 					$return = $this->{$taskname}->run(unserialize($data['data']));
 					if ($return == true) {
-						$this->QueuedTask->markJobDone($data['id']);
+						$this->CronTask->markJobDone($data['id']);
 						$this->out('Job Finished.');
 					} else {
 						$failureMessage = null;
 						if (isset($this->{$taskname}->failureMessage) && !empty($this->{$taskname}->failureMessage)) {
 							$failureMessage = $this->{$taskname}->failureMessage;
 						}
-						$this->QueuedTask->markJobFailed($data['id'], $failureMessage);
+						$this->CronTask->markJobFailed($data['id'], $failureMessage);
 						$this->out('Job did not finish, requeued.');
 					}
-				} elseif (Configure::read('queue.exitwhennothingtodo')) {
+				} elseif (Configure::read('Queue.exitwhennothingtodo')) {
 					$this->out('nothing to do, exiting.');
 					$exit = true;
 				} else {
@@ -186,13 +190,13 @@ class CronShell extends AppShell {
 				}
 
 				// check if we are over the maximum runtime and end processing if so.
-				if (Configure::read('queue.maxruntime') != 0 && (time() - $starttime) >= Configure::read('queue.maxruntime')) {
+				if (Configure::read('Queue.maxruntime') != 0 && (time() - $starttime) >= Configure::read('Queue.maxruntime')) {
 					$exit = true;
-					$this->out('Reached runtime of ' . (time() - $starttime) . ' Seconds (Max ' . Configure::read('queue.maxruntime') . '), terminating.');
+					$this->out('Reached runtime of ' . (time() - $starttime) . ' Seconds (Max ' . Configure::read('Queue.maxruntime') . '), terminating.');
 				}
-				if ($exit || rand(0, 100) > (100 - Configure::read('queue.gcprop'))) {
+				if ($exit || rand(0, 100) > (100 - Configure::read('Queue.gcprop'))) {
 					$this->out('Performing Old job cleanup.');
-					$this->QueuedTask->cleanOldJobs();
+					$this->CronTask->cleanOldJobs();
 				}
 				$this->hr();
 			}
@@ -201,32 +205,34 @@ class CronShell extends AppShell {
 
 	/**
 	 * Manually trigger a Finished job cleanup.
-	 * @return null
+	 *
+	 * @return void
 	 */
 	public function clean() {
-		$this->out('Deleting old jobs, that have finished before ' . date('Y-m-d H:i:s', time() - Configure::read('queue.cleanuptimeout')));
-		$this->QueuedTask->cleanOldJobs();
+		$this->out('Deleting old jobs, that have finished before ' . date('Y-m-d H:i:s', time() - Configure::read('Queue.cleanuptimeout')));
+		$this->CronTask->cleanOldJobs();
 	}
 
 	/**
 	 * Display Some statistics about Finished Jobs.
-	 * @return null
+	 *
+	 * @return void
 	 */
 	public function stats() {
 		$this->out('Jobs currenty in the Queue:');
 
-		$types = $this->QueuedTask->getTypes();
+		$types = $this->CronTask->getTypes();
 
 		foreach ($types as $type) {
-			$this->out("      " . str_pad($type, 20, ' ', STR_PAD_RIGHT) . ": " . $this->QueuedTask->getLength($type));
+			$this->out("      " . str_pad($type, 20, ' ', STR_PAD_RIGHT) . ": " . $this->CronTask->getLength($type));
 		}
 		$this->hr();
-		$this->out('Total unfinished Jobs      : ' . $this->QueuedTask->getLength());
+		$this->out('Total unfinished Jobs      : ' . $this->CronTask->getLength());
 		$this->hr();
 		$this->out('Finished Job Statistics:');
-		$data = $this->QueuedTask->getStats();
+		$data = $this->CronTask->getStats();
 		foreach ($data as $item) {
-			$this->out(" " . $item['QueuedTask']['jobtype'] . ": ");
+			$this->out(" " . $item['CronTask']['jobtype'] . ": ");
 			$this->out("   Finished Jobs in Database: " . $item[0]['num']);
 			$this->out("   Average Job existence    : " . $item[0]['alltime'] . 's');
 			$this->out("   Average Execution delay  : " . $item[0]['fetchdelay'] . 's');
@@ -236,29 +242,30 @@ class CronShell extends AppShell {
 
 	/**
 	 * Returns a List of available QueueTasks and their individual configurations.
+	 *
 	 * @return array
 	 */
 	protected function _getTaskConf() {
-		if (!is_array($this->taskConf)) {
-			$this->taskConf = array();
+		if (!is_array($this->_taskConf)) {
+			$this->_taskConf = array();
 			foreach ($this->tasks as $task) {
-				$this->taskConf[$task]['name'] = $task;
+				$this->_taskConf[$task]['name'] = $task;
 				if (property_exists($this->{$task}, 'timeout')) {
-					$this->taskConf[$task]['timeout'] = $this->{$task}->timeout;
+					$this->_taskConf[$task]['timeout'] = $this->{$task}->timeout;
 				} else {
-					$this->taskConf[$task]['timeout'] = Configure::read('queue.defaultworkertimeout');
+					$this->_taskConf[$task]['timeout'] = Configure::read('Queue.defaultworkertimeout');
 				}
 				if (property_exists($this->{$task}, 'retries')) {
-					$this->taskConf[$task]['retries'] = $this->{$task}->retries;
+					$this->_taskConf[$task]['retries'] = $this->{$task}->retries;
 				} else {
-					$this->taskConf[$task]['retries'] = Configure::read('queue.defaultworkerretries');
+					$this->_taskConf[$task]['retries'] = Configure::read('Queue.defaultworkerretries');
 				}
 				if (property_exists($this->{$task}, 'rate')) {
-					$this->taskConf[$task]['rate'] = $this->{$task}->rate;
+					$this->_taskConf[$task]['rate'] = $this->{$task}->rate;
 				}
 			}
 		}
-		return $this->taskConf;
+		return $this->_taskConf;
 	}
 }
 

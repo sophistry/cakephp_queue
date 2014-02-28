@@ -1,18 +1,17 @@
 <?php
-
 /**
  * @author MGriesbach@gmail.com
- * @package QueuePlugin
- * @subpackage QueuePlugin.Tasks
  * @license http://www.opensource.org/licenses/mit-license.php The MIT License
  * @link http://github.com/MSeven/cakephp_queue
  */
+App::uses('AppShell', 'Console/Command');
 
 /**
  * Execute a Local command on the server.
  *
  */
 class QueueExecuteTask extends AppShell {
+
 	/**
 	 * Adding the QueueTask Model
 	 *
@@ -23,8 +22,6 @@ class QueueExecuteTask extends AppShell {
 	);
 
 	/**
-	 * ZendStudio Codecomplete Hint
-	 *
 	 * @var QueuedTask
 	 */
 	public $QueuedTask;
@@ -35,18 +32,25 @@ class QueueExecuteTask extends AppShell {
 	 * @var integer
 	 */
 	public $timeout = 0;
+
 	/**
 	 * Number of times a failed instance of this task should be restarted before giving up.
 	 *
 	 * @var integer
 	 */
-	public $retries = 0;
+	public $retries = 1;
+
 	/**
 	 * Stores any failure messages triggered during run()
 	 *
 	 * @var string
 	 */
 	public $failureMessage = '';
+
+	/**
+	 * @var boolean
+	 */
+	public $autoUnserialize = true;
 
 	/**
 	 * Add functionality.
@@ -82,8 +86,8 @@ class QueueExecuteTask extends AppShell {
 	 * This function is executed, when a worker is executing a task.
 	 * The return parameter will determine, if the task will be marked completed, or be requeued.
 	 *
-	 * @param array $data the array passed to QueuedTask->createJob()
-	 * @return bool Success
+	 * @param array $data The array passed to QueuedTask->createJob()
+	 * @return boolean Success
 	 */
 	public function run($data) {
 		$command = escapeshellcmd($data['command']) . ' ' . implode(' ', $data['params']);
@@ -93,4 +97,5 @@ class QueueExecuteTask extends AppShell {
 		$this->out($output);
 		return (!$status);
 	}
+
 }

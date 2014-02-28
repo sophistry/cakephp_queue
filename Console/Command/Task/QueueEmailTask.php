@@ -1,16 +1,13 @@
 <?php
+/**
+ * @author Mark Scherer
+ * @license http://www.opensource.org/licenses/mit-license.php The MIT License
+ */
 App::uses('EmailLib', 'Tools.Lib');
 App::uses('AppShell', 'Console/Command');
 
-/**
- * @author MGriesbach@gmail.com
- * @package QueuePlugin
- * @subpackage QueuePlugin.Tasks
- * @license http://www.opensource.org/licenses/mit-license.php The MIT License
- * @link http://github.com/MSeven/cakephp_queue
- * @see http://bakery.cakephp.org/articles/view/emailcomponent-in-a-cake-shell
- */
 class QueueEmailTask extends AppShell {
+
 	/**
 	 * List of default variables for EmailComponent
 	 *
@@ -18,29 +15,18 @@ class QueueEmailTask extends AppShell {
 	 */
 	public $defaults = array(
 		'to' => null,
-		'subject' => null,
-		'charset' => 'UTF-8',
 		'from' => null,
-		'sendAs' => 'html',
-		'template' => null,
-		'debug' => false,
-		'additionalParams' => '',
-		'layout' => 'default'
 	);
+
 	public $timeout = 120;
-	public $retries = 0;
-	/**
-	 * Controller class
-	 *
-	 * @var Controller
-	 */
-	public $Controller;
+
+	public $retries = 1;
 
 	/**
-	 * EmailComponent
-	 *
-	 * @var EmailComponent
+	 * @var boolean
 	 */
+	public $autoUnserialize = true;
+
 	public $Email;
 
 	public function add() {
@@ -55,32 +41,86 @@ class QueueEmailTask extends AppShell {
 				'template' => 'sometemplate'
 			),
 			'vars' => array(
-				'text' => 'hello world'
+				'content' => 'hello world',
 			)
 		), true));
+		$this->out('Alternativly, you can pass the whole EmailLib to directly use it.');
 	}
 
+	/**
+	 * QueueEmailTask::run()
+	 *
+	 * @param mixed $data
+	 * @return boolean Success
+	 */
 	public function run($data) {
-		$this->Email = new EmailLib();
-		//$this->Email->initialize($this->Controller, $this->defaults);
+		if (!isset($data['settings'])) {
+			$this->err('Queue Email task called without settings data.');
+			return false;
+		}
 
-		# prep
-		if (array_key_exists('settings', $data)) {
-			foreach ($data as $key => $val) {
-				if (method_exists($this->Email, $key)) {
-					$this->Email->{$key}($val);
+		if (is_object($email = $data['settings']) && $email instanceof CakeEmail) {
+			try {
+				$transport = $email->transportClass();
+				$config = $email->config();
+				//echo returns($config);
+				$transport->config($config);
+				$result = $transport->send($email);
+
+				if (!isset($config['log']) || !empty($config['logTrace']) && $config['logTrace'] === true) {
+					$config['log'] = 'email_trace';
+				} elseif (!empty($config['logTrace'])) {
+					$config['log'] = $config['logTrace'];
 				}
-				//$this->Email->set(array_filter(array_merge($this->defaults, $data['settings'])));
+				if (isset($config['logTrace']) && !$config['logTrace']) {
+					$config['log'] = false;
+				}
+
+				if (!empty($config['logTrace'])) {
+					$this->_log($result, $config['log']);
+				}
+				return (bool)$result;
+			} catch (Exception $e) {
+
+				$error = $e->getMessage();
+				$error .= ' (line ' . $e->getLine() . ' in ' . $e->getFile() . ')' . PHP_EOL . $e->getTraceAsString();
+				CakeLog::write('email_error', $error);
+
+				return false;
 			}
 		}
-		if (array_key_exists('vars', $data)) {
+
+		$this->Email = new EmailLib();
+		$settings = array_merge($this->defaults, $data['settings']);
+		foreach ($settings as $method => $setting) {
+			call_user_func_array(array($this->Email, $method), (array)$setting);
+		}
+		$message = null;
+		if (!empty($data['vars'])) {
+			if (isset($data['vars']['content'])) {
+				$message = $data['vars']['content'];
+			}
 			$this->Email->viewVars($data['vars']);
 		}
-
-		if (array_key_exists('settings', $data)) {
-			return $this->Email->send();
-		}
-		$this->err('Queue Email task called without settings data.');
-		return false;
+		return $this->Email->send($message);
 	}
+
+	protected function _log($contents, $log) {
+		$config = array(
+			'level' => LOG_DEBUG,
+			'scope' => 'email'
+		);
+		if ($log !== true) {
+			if (!is_array($log)) {
+				$log = array('level' => $log);
+			}
+			$config = array_merge($config, $log);
+		}
+		CakeLog::write(
+			$config['level'],
+			PHP_EOL . $contents['headers'] . PHP_EOL . $contents['message'],
+			$config['scope']
+		);
+	}
+
 }
